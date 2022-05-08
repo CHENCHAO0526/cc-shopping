@@ -9,7 +9,7 @@ class JDUserAccount(object):
         self.__phone_number = phone_number
         self.__pay_password = pay_password
         self.__cookie_file = ""
-        self.__is_login = False
+        self.__is_logined = False
 
     def set_nickname(self, nick_name):
         self.__nickname = nick_name
@@ -20,11 +20,11 @@ class JDUserAccount(object):
     def get_payment(self):
         return self.__pay_password
 
-    def is_login(self):
-        return self.__is_login
+    def get_login_status(self):
+        return self.__is_logined
 
-    def set_login(self, is_login):
-        self.__is_login = is_login
+    def set_login_status(self, is_login):
+        self.__is_logined = is_login
 
 
 

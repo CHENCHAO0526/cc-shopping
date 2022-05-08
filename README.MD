@@ -1,6 +1,8 @@
 # TODO  
-1、账号选择；
-2、多线程刷多个库存组合
+1、账号选择；done  
+2、log panel里错乱bug  
+3、增加login wrapper   done
+4、多线程刷多个库存组合  
 
 # 安装
 1、python 3.9   

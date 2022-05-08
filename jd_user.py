@@ -89,6 +89,18 @@ CART_URL = 'https://cart.jd.com'
 CHANGE_NUM_URL = "https://cart.jd.com/changeNum.action"
 
 
+def _check_login(func):
+    """用户登陆态校验装饰器。若用户未登陆，则调用扫码登陆"""
+    @functools.wraps(func)
+    def new_func(self, *args, **kwargs):
+        if not self.get_login_status():
+            logger.info("{0} 需登陆后调用，开始扫码登陆".format(func.__name__))
+            self._login_by_qrcode()
+        return func(self, *args, **kwargs)
+
+    return new_func
+
+
 # browser的static方法
 def _save_image(resp, image_file):
     with open(image_file, "wb") as f:
@@ -110,17 +122,7 @@ def _get_response_status(resp):
     return True
 
 
-def _check_login(func):
-    """用户登陆态校验装饰器。若用户未登陆，则调用扫码登陆"""
 
-    @functools.wraps(func)
-    def new_func(self, *args, **kwargs):
-        if not self.is_login:
-            logger.info("{0} 需登陆后调用，开始扫码登陆".format(func.__name__))
-            self.login_by_QRcode()
-        return func(self, *args, **kwargs)
-
-    return new_func
 
 
 def _parse_sku_id(sku_ids):
@@ -185,6 +187,7 @@ def _encrypt_pwd(password, public_key=RSA_PUBLIC_KEY):
 def _encrypt_payment_pwd(payment_pwd):
     return ''.join(['u3' + x for x in payment_pwd])
 
+
 class JdUser(object):
     """
     京东用户进行抽象，用户的动作有登录，检查库存，结算
@@ -220,8 +223,11 @@ class JdUser(object):
     def set_sku_ids(self, sku_ids_dict):
         self.__rush_config['sku_ids'] = sku_ids_dict
 
-    def set_login(self, islogin):
-        self.__account.set_login(islogin)
+    def set_login_status(self, login_status):
+        self.__account.set_login_status(login_status)
+        
+    def get_login_status(self):
+        return self.__account.get_login_status()
 
     def get_nickname(self):
         return self.__account.get_nickname()
@@ -238,14 +244,15 @@ class JdUser(object):
 
     def login(self, nickname='ll42883283'):
         if nickname:
-            is_login = self.load_cookies(nickname)
-            self.set_login(True)
-            if is_login:
+            logined_by_cookie = self.load_cookies(nickname)
+            if logined_by_cookie:
+                self.set_login_status(True)
                 return
-        nickname = self.__login_by_qrcode()
+        nickname = self._login_by_qrcode()
         self.set_nickname(nickname)
+        self.set_login_status(True)
 
-    def __login_by_qrcode(self):
+    def _login_by_qrcode(self):
         """
         通过二维码登录
         :return:
@@ -342,7 +349,9 @@ class JdUser(object):
             logger.info(resp_json)
             return False
 
-    # @check_login
+
+
+    @_check_login
     def __get_user_nickname(self):
         """获取用户信息
         :return: 用户名
@@ -380,9 +389,9 @@ class JdUser(object):
         with open(cookies_file, 'rb') as f:
             local_cookies = pickle.load(f)
         self.sess.cookies.update(local_cookies)
-        is_login = self.__validate_cookies()
-        logger.info("加载cookie成功")
-        return is_login
+        logined_by_cookie = self.__validate_cookies()
+        logger.info("加载cookie成功, 成功登录")
+        return logined_by_cookie
 
     def __validate_cookies(self):
         """验证cookies是否有效（是否登陆）
@@ -398,6 +407,7 @@ class JdUser(object):
         self.sess = requests.session()
         return False
 
+    @_check_login
     def buy_item_in_stock(self):
         """根据库存自动下单商品
         :return:
