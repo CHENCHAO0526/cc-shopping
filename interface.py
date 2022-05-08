@@ -48,8 +48,6 @@ class RushGUI(object):
         self.log().pack(side=TOP, expand=False, anchor='center')
 
     def account_choose(self):
-        def login():
-            self.jd_user.login()
         account_choose_frame = Frame(self.root, borderwidth=3, relief="sunken")
         account_label = Label(account_choose_frame, text="账号:")
         login_button = Button(account_choose_frame, text="登录账号", command=self.login)
@@ -74,6 +72,9 @@ class RushGUI(object):
         return account_choose_frame
 
     def login(self):
+        if self.jd_user.get_nickname() == self.user_nickname.get() and self.jd_user.get_login_status():
+            logger.info("{}已登录".format(self.user_nickname.get()))
+            return
         self.jd_user.login(self.user_nickname.get())
 
     def rush_control(self):

@@ -246,6 +246,7 @@ class JdUser(object):
         if nickname:
             logined_by_cookie = self.load_cookies(nickname)
             if logined_by_cookie:
+                self.set_nickname(nickname)
                 self.set_login_status(True)
                 return
         nickname = self._login_by_qrcode()
@@ -277,7 +278,7 @@ class JdUser(object):
 
         nickname = self.__get_user_nickname()
         self.__save_cookies(nickname)
-        logger.info('二维码登录成功')
+        logger.info('账号{} 二维码登录成功'.format(nickname))
         return nickname
 
     def __get_login_page(self):
@@ -390,7 +391,7 @@ class JdUser(object):
             local_cookies = pickle.load(f)
         self.sess.cookies.update(local_cookies)
         logined_by_cookie = self.__validate_cookies()
-        logger.info("加载cookie成功, 成功登录")
+        logger.info("加载cookie成功, 账号{} 成功登录".format(nickname))
         return logined_by_cookie
 
     def __validate_cookies(self):
