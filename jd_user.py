@@ -306,6 +306,9 @@ class JdUser(object):
             logger.info("获取二维码失败")
             return False
 
+        directory = os.path.dirname(DEFAULT_QR_FILE)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
         _save_image(resp, DEFAULT_QR_FILE)
         logger.info("二维码获取成功，请打开京东APP扫描")
         open_image(DEFAULT_QR_FILE)
