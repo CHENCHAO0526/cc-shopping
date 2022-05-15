@@ -276,9 +276,12 @@ class JdUser(object):
         if not self.__validate_QRcode_ticket(ticket):
             raise CCShoppingException('二维码信息校验失败')
 
+
+
+        self.set_login_status(True)
         nickname = self.__get_user_nickname()
-        self.__save_cookies(nickname)
         logger.info('账号{} 二维码登录成功'.format(nickname))
+        self.__save_cookies(nickname)
         return nickname
 
     def __get_login_page(self):
@@ -376,7 +379,7 @@ class JdUser(object):
             return 'jd'
 
     def __save_cookies(self, nickname):
-        cookies_file = './cookies/{0}.cookies'.format(nickname)
+        cookies_file = './cookies/{0}.cookie'.format(nickname)
         directory = os.path.dirname(cookies_file)
         if not os.path.exists(directory):
             os.makedirs(directory)
@@ -384,7 +387,7 @@ class JdUser(object):
             pickle.dump(self.sess.cookies, f)
 
     def load_cookies(self, nickname):
-        cookies_file = './cookies/{0}.cookies'.format(nickname)
+        cookies_file = './cookies/{0}.cookie'.format(nickname)
         if not os.path.exists(cookies_file):
             return False
         with open(cookies_file, 'rb') as f:
