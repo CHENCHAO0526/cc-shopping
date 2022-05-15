@@ -27,11 +27,13 @@ class ReText(object):
 2、执行的信息放入gui中  done
 3、支持同时抢购多个商品组合
 '''
+#TODO 界面优化
 class RushGUI(object):
     def __init__(self, jd_user):
         self.root = Tk()
         self.user_nickname = StringVar()
         self.jd_user = jd_user
+        self.root.title("私家车")
         self.root.geometry("%dx%d" % (800, 600))  # 窗体尺寸
 
         self.plan_control = PlanControl(self.root, borderwidth=3, relief="sunken")
@@ -56,16 +58,16 @@ class RushGUI(object):
 
         if len(nicknames) > 0:
             self.user_nickname.set(nicknames[0])
-        accouts_combobox = ttk.Combobox(
-            master=account_choose_frame,  # 父容器
-            height=10,  # 高度,下拉显示的条目数量
-            width=20,  # 宽度
-            state="readonly",  # 设置状态 normal(可选可输入)、readonly(只可选)、 disabled
-            cursor="arrow",  # 鼠标移动时样式 arrow, circle, cross, plus...
-            #font=("", 20),  # 字体
-            textvariable=self.user_nickname,  # 通过StringVar设置可改变的值
-            values=nicknames,  # 设置下拉框的选项
-        )
+            accouts_combobox = ttk.Combobox(
+                master=account_choose_frame,  # 父容器
+                height=10,  # 高度,下拉显示的条目数量
+                width=20,  # 宽度
+                state="readonly",  # 设置状态 normal(可选可输入)、readonly(只可选)、 disabled
+                cursor="arrow",  # 鼠标移动时样式 arrow, circle, cross, plus...
+                #font=("", 20),  # 字体
+                textvariable=self.user_nickname,  # 通过StringVar设置可改变的值
+                values=nicknames,  # 设置下拉框的选项
+            )
         account_label.pack(side=LEFT)
         accouts_combobox.pack(side=LEFT)
         login_button.pack(side=LEFT)

@@ -14,6 +14,8 @@ def open_image(image_file):
         else:
             os.system("open " + image_file)  # for Mac
 
+def close_image(image_file):
+    os.system('taskkill /f /im ' + image_file)
 
 def parse_json(s):
     begin = s.find('{')

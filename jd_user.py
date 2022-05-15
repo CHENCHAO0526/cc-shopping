@@ -17,6 +17,7 @@ import json
 
 from util import (
     open_image,
+    close_image,
     parse_json,
     get_tag_value,
 )
@@ -276,12 +277,12 @@ class JdUser(object):
         if not self.__validate_QRcode_ticket(ticket):
             raise CCShoppingException('二维码信息校验失败')
 
-
-
         self.set_login_status(True)
         nickname = self.__get_user_nickname()
         logger.info('账号{} 二维码登录成功'.format(nickname))
         self.__save_cookies(nickname)
+        #TODO 扫码完后关闭二维码
+        # close_image(DEFAULT_QR_FILE)
         return nickname
 
     def __get_login_page(self):
