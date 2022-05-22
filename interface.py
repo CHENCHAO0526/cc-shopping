@@ -34,9 +34,13 @@ class RushGUI(object):
         self.user_nickname = StringVar()
         self.jd_user = jd_user
         self.root.title("私家车")
-        self.root.geometry("%dx%d" % (800, 600))  # 窗体尺寸
+        self.root.geometry("%dx%d" % (580, 500))  # 窗体尺寸
 
-        self.plan_control = PlanControl(self.root, borderwidth=3, relief="sunken")
+        #如果给整个窗口弄滚动条需要建一个大frame
+        # scrollBar = Scrollbar(self.root)
+        # scrollBar.pack(side=RIGHT, fill=Y)
+
+        self.plan_control = PlanControl(self.root, borderwidth=1, relief="flat")
 
         self.body()  # 绘制窗体组件
         self.threads = []
@@ -44,13 +48,20 @@ class RushGUI(object):
         self.root.mainloop()
 
     def body(self):
-        self.account_choose().pack(side=TOP, expand=False, anchor='center')
-        self.rush_control().pack(side=TOP, expand=False, anchor='center')
-        self.plan_control.pack(side=TOP, expand=False, anchor='center')
-        self.log().pack(side=TOP, expand=False, anchor='center')
+        self.account_rush().pack(side=TOP, expand=False, anchor='w',fill=X)
+        # self.account_choose().pack(side=TOP, expand=False, anchor='w')
+        # self.rush_control().pack(side=TOP, expand=False, anchor='w')
+        self.plan_control.pack(side=TOP, expand=False, anchor='w',fill=X)
+        self.log().pack(side=TOP, expand=False, anchor='w',fill=X)
 
-    def account_choose(self):
-        account_choose_frame = Frame(self.root, borderwidth=3, relief="sunken")
+    def account_rush(self):
+        account_rush_frame = Frame(self.root, borderwidth=5, relief="flat")
+        self.account_choose(account_rush_frame).pack(side=LEFT, expand=False, anchor='w')
+        self.rush_control(account_rush_frame).pack(side=RIGHT, expand=False, anchor='e')
+        return account_rush_frame
+
+    def account_choose(self,topFrame):
+        account_choose_frame = Frame(topFrame, borderwidth=1, relief="groove")
         account_label = Label(account_choose_frame, text="账号:")
         login_button = Button(account_choose_frame, text="登录账号", command=self.login)
         cookie_files = os.listdir(COOKIE_DIR)
@@ -79,8 +90,8 @@ class RushGUI(object):
             return
         self.jd_user.login(self.user_nickname.get())
 
-    def rush_control(self):
-        rush_control_frame = Frame(self.root, borderwidth=3, relief="sunken")
+    def rush_control(self,topFrame):
+        rush_control_frame = Frame(topFrame, borderwidth=1, relief="groove")
         rush_button = Button(rush_control_frame, text='开始rush', command=self.start_rush)
         stop_rush_button = Button(rush_control_frame, text='停止rush', command=self.stop_rush)
         rush_button.pack(side=LEFT)
@@ -92,7 +103,7 @@ class RushGUI(object):
         日志输出到GUI上
         :return:
         """
-        log_frame = Frame(self.root, borderwidth=3, relief="sunken")
+        log_frame = Frame(self.root, borderwidth=1, relief="ridge")
         scroll_bar = Scrollbar(log_frame)
         scroll_bar.pack(side="right", fill="y")
         text = Text(log_frame, yscrollcommand=scroll_bar.set)
@@ -144,8 +155,8 @@ class PlanControl(Frame):
     def __init__(self, master=None, cnf={}, **kw):
         super(PlanControl, self).__init__(master=master, cnf=cnf, **kw)
         self.add_plan_button = Button(self, text='增加plan', command=self.add_plan)
-        self.head_frame = Frame(self, borderwidth=3, relief="sunken")
-        self.plan_frames = PlanFrames(self, borderwidth=3, relief="sunken")
+        self.head_frame = Frame(self, borderwidth=3, relief="groove")
+        self.plan_frames = PlanFrames(self, borderwidth=3)
 
         self.init_body()
 
@@ -153,8 +164,8 @@ class PlanControl(Frame):
 
         self.init_head()
         self.add_plan_button.pack(side=LEFT, expand=False, anchor=N)
-        self.head_frame.pack(side=TOP, expand=False, anchor=CENTER)
-        self.plan_frames.pack(side=TOP, expand=False, anchor=CENTER)
+        # self.head_frame.pack(side=TOP, expand=False, anchor=CENTER)
+        self.plan_frames.pack(side=RIGHT, expand=False, anchor=CENTER)
 
     def init_head(self):
         plan_label = Label(self.head_frame, text="plan", borderwidth=3, relief="sunken")
@@ -183,7 +194,7 @@ class PlanFrames(Frame):
         self.add_plan()
 
     def add_plan(self):
-        self.plan_frames[self.plan_count] = PlanFrame(self, plan_index=self.plan_count, borderwidth=3, relief="sunken")
+        self.plan_frames[self.plan_count] = PlanFrame(self, plan_index=self.plan_count, borderwidth=3, relief="groove")
         self.plan_frames[self.plan_count].pack(side=TOP, expand=False, anchor='center')
         self.plan_count += 1
 
@@ -210,7 +221,7 @@ class PlanFrame(Frame):
         assert plan_index != -1
         self.plan_index = plan_index
         self.plan_label = Label(self, text="plan {}".format(plan_index))
-        self.sku_frames = SkuFrames(self, borderwidth=3, relief="sunken")
+        self.sku_frames = SkuFrames(self, borderwidth=3, relief="flat")
         self.add_sku_button = Button(self, text='增加商品', command=self.add_sku)
         self.remove_plan_button = Button(self, text='移除plan', command=self.remove_plan)
 
@@ -248,7 +259,7 @@ class SkuFrames(Frame):
         self.add_sku()
 
     def add_sku(self):
-        self.sku_frames[self.sku_count] = SkuFrame(self, sku_index=self.sku_count, borderwidth=3, relief="sunken")
+        self.sku_frames[self.sku_count] = SkuFrame(self, sku_index=self.sku_count, borderwidth=3, relief="flat")
         self.sku_frames[self.sku_count].pack(side=TOP, expand=False, anchor='center')
         self.sku_count += 1
 
