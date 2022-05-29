@@ -1,15 +1,13 @@
+import logging
 import os
+import queue
+import threading
 from tkinter import *
-import tkinter as tk
 from tkinter import ttk
 from tkinter.messagebox import *
-import threading
-import time
-from log import logger, formatter
-import queue
 
-import logging
 from consts.consts import *
+from log import logger, formatter
 
 
 # 自定义re_Text, 自定义IO有write方法
@@ -32,9 +30,10 @@ class RushGUI(object):
     def __init__(self, jd_user):
         self.root = Tk()
         self.user_nickname = StringVar()
+        self.submit_mode = StringVar()
         self.jd_user = jd_user
         self.root.title("私家车")
-        self.root.geometry("%dx%d" % (580, 500))  # 窗体尺寸
+        self.root.geometry("%dx%d" % (800, 600))  # 窗体尺寸
 
         #如果给整个窗口弄滚动条需要建一个大frame
         # scrollBar = Scrollbar(self.root)
@@ -57,28 +56,31 @@ class RushGUI(object):
     def account_rush(self):
         account_rush_frame = Frame(self.root, borderwidth=5, relief="flat")
         self.account_choose(account_rush_frame).pack(side=LEFT, expand=False, anchor='w')
+        self.presall_choose(account_rush_frame).pack(side=LEFT, expand=False, anchor='w')
         self.rush_control(account_rush_frame).pack(side=RIGHT, expand=False, anchor='e')
         return account_rush_frame
 
-    def account_choose(self,topFrame):
-        account_choose_frame = Frame(topFrame, borderwidth=1, relief="groove")
+
+    def account_choose(self,top_frame):
+        account_choose_frame = Frame(top_frame, borderwidth=1, relief="groove")
         account_label = Label(account_choose_frame, text="账号:")
         login_button = Button(account_choose_frame, text="登录账号", command=self.login)
         cookie_files = os.listdir(COOKIE_DIR)
+        cookie_files = [file for file in cookie_files if file.endswith('.cookie')]
         nicknames = [file.split('.')[0] for file in cookie_files]
 
         if len(nicknames) > 0:
             self.user_nickname.set(nicknames[0])
-            accouts_combobox = ttk.Combobox(
-                master=account_choose_frame,  # 父容器
-                height=10,  # 高度,下拉显示的条目数量
-                width=20,  # 宽度
-                state="readonly",  # 设置状态 normal(可选可输入)、readonly(只可选)、 disabled
-                cursor="arrow",  # 鼠标移动时样式 arrow, circle, cross, plus...
-                #font=("", 20),  # 字体
-                textvariable=self.user_nickname,  # 通过StringVar设置可改变的值
-                values=nicknames,  # 设置下拉框的选项
-            )
+        accouts_combobox = ttk.Combobox(
+            master=account_choose_frame,  # 父容器
+            height=10,  # 高度,下拉显示的条目数量
+            width=20,  # 宽度
+            state="readonly",  # 设置状态 normal(可选可输入)、readonly(只可选)、 disabled
+            cursor="arrow",  # 鼠标移动时样式 arrow, circle, cross, plus...
+            #font=("", 20),  # 字体
+            textvariable=self.user_nickname,  # 通过StringVar设置可改变的值
+            values=nicknames,  # 设置下拉框的选项
+        )
         account_label.pack(side=LEFT)
         accouts_combobox.pack(side=LEFT)
         login_button.pack(side=LEFT)
@@ -90,8 +92,32 @@ class RushGUI(object):
             return
         self.jd_user.login(self.user_nickname.get())
 
-    def rush_control(self,topFrame):
-        rush_control_frame = Frame(topFrame, borderwidth=1, relief="groove")
+    def presall_choose(self,top_frame):
+        presall_choose_frame = Frame(top_frame, borderwidth=1, relief="groove")
+        account_label = Label(presall_choose_frame, text="购买模式:")
+        login_button = Button(presall_choose_frame, text="改变模式", command=self.set_submit_mode)
+
+        self.submit_mode.set("预售")
+        accouts_combobox = ttk.Combobox(
+            master=presall_choose_frame,  # 父容器
+            height=10,  # 高度,下拉显示的条目数量
+            width=20,  # 宽度
+            state="readonly",  # 设置状态 normal(可选可输入)、readonly(只可选)、 disabled
+            cursor="arrow",  # 鼠标移动时样式 arrow, circle, cross, plus...
+            # font=("", 20),  # 字体
+            textvariable=self.submit_mode,  # 通过StringVar设置可改变的值
+            values=["现货", "预售"],  # 设置下拉框的选项
+        )
+        account_label.pack(side=LEFT)
+        accouts_combobox.pack(side=LEFT)
+        login_button.pack(side=LEFT)
+        return presall_choose_frame
+
+    def set_submit_mode(self):
+        self.jd_user.set_submit_mode(self.submit_mode.get())
+
+    def rush_control(self,top_frame):
+        rush_control_frame = Frame(top_frame, borderwidth=1, relief="groove")
         rush_button = Button(rush_control_frame, text='开始rush', command=self.start_rush)
         stop_rush_button = Button(rush_control_frame, text='停止rush', command=self.stop_rush)
         rush_button.pack(side=LEFT)

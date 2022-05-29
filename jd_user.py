@@ -14,6 +14,8 @@ from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5 as Cipher_pkcs1_v1_5
 from base64 import b64encode
 import json
+from urllib import parse
+import traceback
 
 from util import (
     open_image,
@@ -88,6 +90,7 @@ CANCEL_ALL_ITEM_URL = "https://cart.jd.com/cancelAllItem.action"
 CART_ACTION_URL = 'https://cart.jd.com/cart_index'
 CART_URL = 'https://cart.jd.com'
 CHANGE_NUM_URL = "https://cart.jd.com/changeNum.action"
+ITEM_URL = "https://item.jd.com/{}.html"
 
 
 def _check_login(func):
@@ -188,29 +191,33 @@ def _encrypt_pwd(password, public_key=RSA_PUBLIC_KEY):
 def _encrypt_payment_pwd(payment_pwd):
     return ''.join(['u3' + x for x in payment_pwd])
 
-
 class JdUser(object):
     """
     京东用户进行抽象，用户的动作有登录，检查库存，结算
     """
-
     def __init__(self, config):
+        super().__init__()
         account_config = config.get_section_config("account")
         browser_config = config.get_section_config("browser")
         rush_config = config.get_section_config("rush")
-        self.__extra_config = config.get_section_config("extra")
-        self.__account = JDUserAccount(**account_config)
-        self.__rush_config = self.__parse_rush_config(rush_config)
-        self.__user_agent = DEFAULT_USER_AGENT if not browser_config['use_random_ua'] else _get_random_useragent()
-        self.__headers = {"User-Agent": self.__user_agent}
+        self._extra_config = config.get_section_config("extra")
+        self._account = JDUserAccount(**account_config)
+        self._rush_config = self._parse_rush_config(rush_config)
+        self._user_agent = DEFAULT_USER_AGENT if not browser_config['use_random_ua'] else _get_random_useragent()
+        self._headers = {"User-Agent": self._user_agent}
         self.sess = requests.session()
-        self.__item_cat = dict()
-        self.__item_vender_ids = dict()  # 记录商家id
-        self.__risk_control = self.__extra_config['risk_control']
+        self.sess.trust_env = False
+        self._item_cat = dict()
+        self._item_vender_ids = dict()  # 记录商家id
+        self._risk_control = self._extra_config['risk_control']
 
-        self.rushing = True
+        self._submit_mode = "预售"
+        self._submit_func = self._submit_order_presall
+        logger.info("购买模式默认为 {}".format(self._submit_mode))
 
-    def __parse_rush_config(self, rush_config):
+        self._rushing = True
+
+    def _parse_rush_config(self, rush_config):
         rush_config_dict = dict()
         rush_config_dict['sku_ids'] = _parse_sku_id(rush_config["sku_ids"])
         rush_config_dict['area_id'] = _parse_area_id(rush_config['area_id'])
@@ -222,25 +229,34 @@ class JdUser(object):
         return rush_config_dict
 
     def set_sku_ids(self, sku_ids_dict):
-        self.__rush_config['sku_ids'] = sku_ids_dict
+        self._rush_config['sku_ids'] = sku_ids_dict
 
     def set_login_status(self, login_status):
-        self.__account.set_login_status(login_status)
+        self._account.set_login_status(login_status)
         
     def get_login_status(self):
-        return self.__account.get_login_status()
+        return self._account.get_login_status()
 
     def get_nickname(self):
-        return self.__account.get_nickname()
+        return self._account.get_nickname()
 
     def set_nickname(self, nickname):
-        self.__account.set_nickname(nickname)
+        self._account.set_nickname(nickname)
 
     def is_rushing(self):
-        return self.rushing
+        return self._rushing
 
     def set_rushing(self, rushing):
-        self.rushing = rushing
+        self._rushing = rushing
+
+    def set_submit_mode(self, mode):
+        logger.info("购买模式变为 {}".format(mode))
+        assert mode in ["现货", "预售"]
+        self._submit_mode = mode
+        if self._submit_mode == "现货":
+            self._submit_func = self._submit_order
+        elif self._submit_mode == "预售":
+            self._submit_func = self._submit_order_presall
 
 
     def login(self, nickname='ll42883283'):
@@ -259,14 +275,14 @@ class JdUser(object):
         通过二维码登录
         :return:
         """
-        self.__get_login_page()
+        self._get_login_page()
         # download QR code
-        if not self.__get_login_QRcode():
+        if not self._get_login_QRcode():
             raise CCShoppingException("二维码下载失败")
         # get QR code ticket
         retry_times = 85
         for _ in range(retry_times):
-            ticket = self.__get_QRcode_ticket()
+            ticket = self._get_QRcode_ticket()
             if ticket:
                 break
             logger.info("二维码扫描未成功")
@@ -274,22 +290,22 @@ class JdUser(object):
         else:
             raise CCShoppingException("二维码过期，请重新获取扫描")
         # validate QR code ticket
-        if not self.__validate_QRcode_ticket(ticket):
+        if not self._validate_QRcode_ticket(ticket):
             raise CCShoppingException('二维码信息校验失败')
 
         self.set_login_status(True)
-        nickname = self.__get_user_nickname()
+        nickname = self._get_user_nickname()
         logger.info('账号{} 二维码登录成功'.format(nickname))
-        self.__save_cookies(nickname)
+        self._save_cookies(nickname)
         #TODO 扫码完后关闭二维码
         # close_image(DEFAULT_QR_FILE)
         return nickname
 
-    def __get_login_page(self):
-        page = self.sess.get(LOGIN_URL, headers=self.__headers)
+    def _get_login_page(self):
+        page = self.sess.get(LOGIN_URL, headers=self._headers)
         return page
 
-    def __get_login_QRcode(self):
+    def _get_login_QRcode(self):
 
         # think 这些变量是该放在离使用地方远的地方还是近的
         payload = {
@@ -298,7 +314,7 @@ class JdUser(object):
             "t": str(int(time.time() * 1000)),
         }
         headers = {
-            "User-Agent": self.__user_agent,
+            "User-Agent": self._user_agent,
             "Referer": LOGIN_URL,
         }
         resp = self.sess.get(url=QR_CODE_URL, headers=headers, params=payload)
@@ -315,7 +331,7 @@ class JdUser(object):
         open_image(DEFAULT_QR_FILE)
         return True
 
-    def __get_QRcode_ticket(self):
+    def _get_QRcode_ticket(self):
         payload = {
             "appid": "133",
             "callback": "jQuery{}".format(random.randint(1000000, 9999999)),
@@ -323,7 +339,7 @@ class JdUser(object):
             "_": str(int(time.time() * 1000)),
         }
         headers = {
-            "User-Agent": self.__user_agent,
+            "User-Agent": self._user_agent,
             "Referer": LOGIN_URL,
         }
         resp = self.sess.get(url=QR_CHECK_URL, headers=headers, params=payload)
@@ -340,9 +356,9 @@ class JdUser(object):
             logger.info("已完成手机客户端确认")
             return resp_json["ticket"]
 
-    def __validate_QRcode_ticket(self, ticket):
+    def _validate_QRcode_ticket(self, ticket):
         headers = {
-            'User-Agent': self.__user_agent,
+            'User-Agent': self._user_agent,
             'Referer': 'https://passport.jd.com/uc/login?ltype=logout',
         }
         resp = self.sess.get(url=QR_TICKET_VALIDATE_URL, headers=headers, params={'t': ticket})
@@ -360,7 +376,7 @@ class JdUser(object):
 
 
     @_check_login
-    def __get_user_nickname(self):
+    def _get_user_nickname(self):
         """获取用户信息
         :return: 用户名
         """
@@ -369,20 +385,19 @@ class JdUser(object):
             '_': str(int(time.time() * 1000)),
         }
         headers = {
-            'User-Agent': self.__user_agent,
+            'User-Agent': self._user_agent,
             'Referer': 'https://order.jd.com/center/list.action',
         }
-        try:
-            resp = self.sess.get(url=USER_INFO_URL, params=payload, headers=headers)
-            resp_json = parse_json(resp.text)
-            # many user info are included in response, now return nick name in it
-            # jQuery2381773({"imgUrl":"//storage.360buyimg.com/i.imageUpload/xxx.jpg","lastLoginTime":"","nickName":"xxx","plusStatus":"0","realName":"xxx","userLevel":x,"userScoreVO":{"accountScore":xx,"activityScore":xx,"consumptionScore":xxxxx,"default":false,"financeScore":xxx,"pin":"xxx","riskScore":x,"totalScore":xxxxx}})
-            return resp_json.get('nickName') or 'jd'
-        except Exception:
-            logger.error("获取用户信息失败")
+        resp = self.sess.get(url=USER_INFO_URL, params=payload, headers=headers)
+        if not _get_response_status(resp):
+            logger.error("获取用户信息失败 resp.text{}".format(resp.text))
             return 'jd'
+        resp_json = parse_json(resp.text)
+        # many user info are included in response, now return nick name in it
+        # jQuery2381773({"imgUrl":"//storage.360buyimg.com/i.imageUpload/xxx.jpg","lastLoginTime":"","nickName":"xxx","plusStatus":"0","realName":"xxx","userLevel":x,"userScoreVO":{"accountScore":xx,"activityScore":xx,"consumptionScore":xxxxx,"default":false,"financeScore":xxx,"pin":"xxx","riskScore":x,"totalScore":xxxxx}})
+        return resp_json.get('nickName') or 'jd'
 
-    def __save_cookies(self, nickname):
+    def _save_cookies(self, nickname):
         cookies_file = './cookies/{0}.cookie'.format(nickname)
         directory = os.path.dirname(cookies_file)
         if not os.path.exists(directory):
@@ -397,11 +412,11 @@ class JdUser(object):
         with open(cookies_file, 'rb') as f:
             local_cookies = pickle.load(f)
         self.sess.cookies.update(local_cookies)
-        logined_by_cookie = self.__validate_cookies()
+        logined_by_cookie = self._validate_cookies()
         logger.info("加载cookie成功, 账号{} 成功登录".format(nickname))
         return logined_by_cookie
 
-    def __validate_cookies(self):
+    def _validate_cookies(self):
         """验证cookies是否有效（是否登陆）
         通过访问用户订单列表页进行判断：若未登录，将会重定向到登陆页面。
         :return: cookies是否有效 True/False
@@ -420,19 +435,20 @@ class JdUser(object):
         """根据库存自动下单商品
         :return:
         """
-        logger.info('下单模式：%s 所有都商品同时有货并且未下架才会尝试下单', self.__rush_config["sku_ids"])
+        logger.info('下单模式：%s 所有都商品同时有货并且未下架才会尝试下单', self._rush_config["sku_ids"])
         self._cancel_select_all_cart_item()
-        while self.rushing:
-            items_dict = self.__rush_config["sku_ids"]
-            stock_interval = self.__rush_config["stock_interval"]
-            if not self.if_item_can_be_ordered():
+        while self._rushing:
+            items_dict = self._rush_config["sku_ids"]
+            stock_interval = self._rush_config["stock_interval"]
+            if not self.if_item_can_be_ordered_new():
                 logger.info('%s 不满足下单条件，%ss后进行下一次查询', items_dict, stock_interval)
                 continue
             logger.info('%s 满足下单条件，开始执行', items_dict)
-            cart_item_details = self._get_cart_detail()
-            for (sku_id, count) in items_dict.items():
-                self._add_or_change_cart_item(cart_item_details, sku_id, count)
-            if self._submit_order_with_retry(self.__rush_config['submit_retry'], self.__rush_config['submit_interval']):
+            if self._submit_mode == "现货":
+                cart_item_details = self._get_cart_detail()
+                for (sku_id, count) in items_dict.items():
+                    self._add_or_change_cart_item(cart_item_details, sku_id, count)
+            if self._submit_order_with_retry(self._rush_config['submit_retry'], self._rush_config['submit_interval']):
                 return
             time.sleep(stock_interval)
         logger.info('stop rush')
@@ -441,15 +457,24 @@ class JdUser(object):
         """判断商品是否能下单
         :return: 商品是否能下单 True/False
         """
-        items_dict = self.__rush_config["sku_ids"]
-        area_id = self.__rush_config["area_id"]
+        items_dict = self._rush_config["sku_ids"]
+        area_id = self._rush_config["area_id"]
 
         # 判断商品是否能下单
         if len(items_dict) > 1:
-            return self.get_multi_item_stock_status(sku_ids=items_dict, area=area_id)
+            return self.get_multi_item_stock_status(sku_ids_dict=items_dict, area=area_id)
 
         sku_id, count = list(items_dict.items())[0]
         return self.get_single_item_stock_status(sku_id=sku_id, num=count, area=area_id)
+
+    def if_item_can_be_ordered_new(self):
+        """判断商品是否能下单
+        :return: 商品是否能下单 True/False
+        """
+        items_dict = self._rush_config["sku_ids"]
+        area_id = self._rush_config["area_id"]
+
+        return self.get_multi_item_stock_status(sku_ids_dict=items_dict, area=area_id)
 
     def get_single_item_stock_status(self, sku_id, num, area):
         """获取单个商品库存状态
@@ -460,17 +485,17 @@ class JdUser(object):
         """
         area_id = _parse_area_id(area)
 
-        cat = self.__item_cat.get(sku_id)
-        vender_id = self.__item_vender_ids.get(sku_id)
+        cat = self._item_cat.get(sku_id)
+        vender_id = self._item_vender_ids.get(sku_id)
         if not cat:
-            page = self.__get_item_detail_page(sku_id)
+            page = self._get_item_detail_page(sku_id)
             match = re.search(r'cat: \[(.*?)\]', page.text)
             cat = match.group(1)
-            self.__item_cat[sku_id] = cat
+            self._item_cat[sku_id] = cat
 
             match = re.search(r'venderId:(\d*?),', page.text)
             vender_id = match.group(1)
-            self.__item_vender_ids[sku_id] = vender_id
+            self._item_vender_ids[sku_id] = vender_id
 
         payload = {
             'skuId': sku_id,
@@ -484,64 +509,65 @@ class JdUser(object):
             'venderId': vender_id  # return seller information with this param (can't be ignored)
         }
         headers = {
-            'User-Agent': self.__user_agent,
+            'User-Agent': self._user_agent,
             'Referer': 'https://item.jd.com/{}.html'.format(sku_id),
         }
 
-        resp_text = requests.get(url=STOCK_URL, params=payload, headers=headers,
-                                 timeout=self.__rush_config['timeout']).text
         try:
-            resp_text = requests.get(url=STOCK_URL, params=payload, headers=headers, timeout=self.__rush_config['timeout']).text
+            resp_text = requests.get(url=STOCK_URL, params=payload, headers=headers, timeout=self._rush_config['timeout']).text
             resp_json = parse_json(resp_text)
             stock_info = resp_json.get('stock')
             sku_state = stock_info.get('skuState')  # 商品是否上架
             stock_state = stock_info.get('StockState')  # 商品库存状态：33 -- 现货  0,34 -- 无货  36 -- 采购中  40 -- 可配货
             return sku_state == 1 and stock_state in (33, 40)
         except requests.exceptions.Timeout:
-            logger.error('查询 %s 库存信息超时(%ss)', sku_id, self.__rush_config['timeout'])
+            logger.error('查询 %s 库存信息超时(%ss)', sku_id, self._rush_config['timeout'])
+            logger.error('traceback \n%s', traceback.format_exc())
             return False
         except requests.exceptions.RequestException as request_exception:
             logger.error('查询 %s 库存信息发生网络请求异常：%s', sku_id, request_exception)
+            logger.error('traceback \n%s', traceback.format_exc())
             return False
         except Exception as e:
-            logger.error('查询 %s 库存信息发生异常, resp: %s, exception: %s', sku_id, resp_text, e)
+            logger.error('查询 %s 库存信息发生异常, resp: %s, exception: %s', sku_id, e)
+            logger.error('traceback \n%s', traceback.format_exc())
             return False
 
-    def __get_item_detail_page(self, sku_id):
+    def _get_item_detail_page(self, sku_id):
         """访问商品详情页
         :param sku_id: 商品id
         :return: 响应
         """
         url = 'https://item.jd.com/{}.html'.format(sku_id)
-        page = requests.get(url=url, headers=self.__headers)
+        page = requests.get(url=url, headers=self._headers)
         return page
 
-    def get_multi_item_stock_status(self, sku_ids, area):
+    def get_multi_item_stock_status(self, sku_ids_dict, area):
         """获取多个商品库存状态（新）
 
         当所有商品都有货，返回True；否则，返回False。
 
-        :param sku_ids: 多个商品的id。可以传入中间用英文逗号的分割字符串，如"123,456"
+        :param sku_ids_dict: 多个商品的id。可以传入中间用英文逗号的分割字符串，如"123,456"
         :param area: 地区id
         :return: 多个商品是否同时有货 True/False
         """
-        items_dict = _parse_sku_id(sku_ids=sku_ids)
+        #items_dict = _parse_sku_id(sku_ids=sku_ids)
         area_id = _parse_area_id(area=area)
 
         payload = {
             'callback': 'jQuery{}'.format(random.randint(1000000, 9999999)),
             'type': 'getstocks',
-            'skuIds': ','.join(items_dict.keys()),
+            'skuIds': ','.join(sku_ids_dict.keys()),
             'area': area_id,
             '_': str(int(time.time() * 1000))
         }
         headers = {
-            'User-Agent': self.__user_agent
+            'User-Agent': self._user_agent
         }
 
         resp_text = ''
         try:
-            resp_text = requests.get(url=STOCK_URL, params=payload, headers=headers, timeout=self.__rush_config['timeout']).text
+            resp_text = requests.get(url=STOCK_URL, params=payload, headers=headers, timeout=self._rush_config['timeout']).text
             for sku_id, info in parse_json(resp_text).items():
                 sku_state = info.get('skuState')  # 商品是否上架
                 stock_state = info.get('StockState')  # 商品库存状态
@@ -551,13 +577,16 @@ class JdUser(object):
                     return False
             return True
         except requests.exceptions.Timeout:
-            logger.error('查询 %s 库存信息超时(%ss)', list(items_dict.keys()), self.__rush_config['timeout'])
+            logger.error('查询 %s 库存信息超时(%ss)', list(sku_ids_dict.keys()), self._rush_config['timeout'])
+            logger.error('traceback \n%s', traceback.format_exc())
             return False
         except requests.exceptions.RequestException as request_exception:
-            logger.error('查询 %s 库存信息发生网络请求异常：%s', list(items_dict.keys()), request_exception)
+            logger.error('查询 %s 库存信息发生网络请求异常：%s', list(sku_ids_dict.keys()), request_exception)
+            logger.error('traceback \n%s', traceback.format_exc())
             return False
         except Exception as e:
-            logger.error('查询 %s 库存信息发生异常, resp: %s, exception: %s', list(items_dict.keys()), resp_text, e)
+            logger.error('查询 %s 库存信息发生异常, resp: %s, exception: %s', list(sku_ids_dict.keys()), resp_text, e)
+            logger.error('traceback \n%s', traceback.format_exc())
             return False
 
     # def _cancel_select_all_cart_item(self):
@@ -587,7 +616,7 @@ class JdUser(object):
         # }
         # data_json = json.dumps(data)
         headers = {
-            'User-Agent': self.__user_agent,
+            'User-Agent': self._user_agent,
             'Referer': 'https://cart.jd.com',
         }
 
@@ -600,7 +629,7 @@ class JdUser(object):
         :return: 购物车商品信息 dict
         """
         headers = {
-            'User-Agent': self.__user_agent,
+            'User-Agent': self._user_agent,
             'Referer': CART_URL
         }
         resp = self.sess.get(CART_ACTION_URL, headers=headers)
@@ -629,6 +658,7 @@ class JdUser(object):
                 }
             except Exception as e:
                 logger.error("某商品在购物车中的信息无法解析，报错信息: %s，该商品自动忽略。 %s", e, item)
+                logger.error('traceback \n%s', traceback.format_exc())
 
         logger.info('购物车信息：%s', cart_detail)
         return cart_detail
@@ -639,7 +669,7 @@ class JdUser(object):
         :return: 购物车商品信息 dict
         """
         headers = {
-            'User-Agent': self.__user_agent,
+            'User-Agent': self._user_agent,
             'Referer': CART_URL
         }
         CART_DETAIL_URL = 'https://api.m.jd.com/api?functionId=pcCart_jc_getCurrentCart&appid=JDC_mall_cart&loginType=3&body={"serInfo":{"area":"4_48201_52489_0"},"cartExt":{"specialId":1}}'
@@ -701,7 +731,7 @@ class JdUser(object):
             return
 
         soup = BeautifulSoup(resp.text, "html.parser")
-        self.__risk_control = get_tag_value(soup.select('input#riskControl'), 'value')
+        self._risk_control = get_tag_value(soup.select('input#riskControl'), 'value')
 
         order_detail = {
             'address': soup.find('span', id='sendAddr').text[5:],  # remove '寄送至： ' from the begin
@@ -749,7 +779,7 @@ class JdUser(object):
             # 'locationId'
         }
         headers = {
-            'User-Agent': self.__user_agent,
+            'User-Agent': self._user_agent,
             'Referer': 'https://cart.jd.com/cart',
         }
         resp = self.sess.post(url, data=data, headers=headers)
@@ -774,7 +804,7 @@ class JdUser(object):
         """
         url = 'https://cart.jd.com/gate.action'
         headers = {
-            'User-Agent': self.__user_agent,
+            'User-Agent': self._user_agent,
         }
 
         for sku_id, count in _parse_sku_id(sku_ids=sku_ids).items():
@@ -798,14 +828,11 @@ class JdUser(object):
     def change_sku_num_in_cart(self):
         url = 'https://api.m.jd.com/api?functionId=pcCart_jc_changeSkuNum&appid=JDC_mall_cart&loginType=3&body={"operations":[{"TheSkus":[{"Id":"10107205060","num":5,"skuUuid":"F2sb2k1063935514318069760","useUuid":false}]}],"serInfo":{"area":"1_2800_55816_0"}}'
         headers = {
-            'User-Agent': self.__user_agent,
+            'User-Agent': self._user_agent,
             'Referer': 'https://cart.jd.com/cart',
         }
         resp = self.sess.post(url, headers=headers)
         return resp
-
-
-
 
     #@check_login
     def _submit_order_with_retry(self, retry=3, interval=4):
@@ -817,7 +844,7 @@ class JdUser(object):
         for i in range(1, retry + 1):
             logger.info('第[%s/%s]次尝试提交订单', i, retry)
             #self.get_checkout_page_detail()
-            if self._submit_order():
+            if self._submit_func():
                 logger.info('第%s次提交订单成功', i)
                 return True
             else:
@@ -848,22 +875,22 @@ class JdUser(object):
             'submitOrderParam.trackID': 'TestTrackId',
             'submitOrderParam.ignorePriceChange': '0',
             'submitOrderParam.btSupport': '0',
-            'riskControl': self.__risk_control,
+            'riskControl': self._risk_control,
             'submitOrderParam.isBestCoupon': 1,
             'submitOrderParam.jxj': 1,
-            'submitOrderParam.trackId': self.__extra_config['track_id'],  # Todo: need to get trackId
-            'submitOrderParam.eid': self.__extra_config['eid'],
-            'submitOrderParam.fp': self.__extra_config['fp'],
+            'submitOrderParam.trackId': self._extra_config['track_id'],  # Todo: need to get trackId
+            'submitOrderParam.eid': self._extra_config['eid'],
+            'submitOrderParam.fp': self._extra_config['fp'],
             'submitOrderParam.needCheck': 1,
         }
 
         # add payment password when necessary
-        payment_pwd = self.__account.get_payment()
+        payment_pwd = self._account.get_payment()
         if payment_pwd:
             data['submitOrderParam.payPassword'] = _encrypt_payment_pwd(payment_pwd)
 
         headers = {
-            'User-Agent': self.__user_agent,
+            'User-Agent': self._user_agent,
             'Host': 'trade.jd.com',
             'Referer': 'http://trade.jd.com/shopping/order/getOrderInfo.action',
         }
@@ -908,6 +935,71 @@ class JdUser(object):
             logger.info('订单提交失败, 错误码：%s, 返回信息：%s', result_code, message)
             logger.info(resp_json)
             return False
+
+    # 预售的提交订单
+    def _submit_order_presall(self):
+        items_dict = self._rush_config["sku_ids"]
+        sku = list(items_dict.keys())[0]
+        num = items_dict[sku]
+        item_url = ITEM_URL.format(sku)
+        cart_presall_url = "https://cart.jd.com/cart/dynamic/gateForSubFlow.action?wids={}&nums={}&subType=32".format(sku, num)
+
+        self._headers['Referer'] = item_url
+        headers = {
+            'User-Agent': self._user_agent,
+            'Referer': CART_URL
+        }
+        resp = self.sess.get(cart_presall_url, headers=headers)
+        if not _get_response_status(resp):
+            logger.error('获取预售订单结算页信息失败')
+            return
+        get_presall_info_url = resp.url
+
+        url = 'https://trade.jd.com/shopping/order/submitOrder.action'
+        # js function of submit order is included in https://trade.jd.com/shopping/misc/js/order.js?r=2018070403091
+
+        param_str = 'overseaPurchaseCookies=&vendorRemarks=[{"venderId":"62710","remark":""}]&submitOrderParam.sopNotPutInvoice=false&submitOrderParam.presaleMobile=131****8925&submitOrderParam.presalePayType=2&submitOrderParam.trackID=TestTrackId&flowType=15&preSalePaymentTypeInOptional=2&submitOrderParam.ignorePriceChange=0&submitOrderParam.btSupport=0&submitOrderParam.payType4YuShou=2&submitOrderParam.eid=NMU4TF2OKDQY6ET3QRLBQ7QJLAYZAJMO6C6VUECELR7JWHLIIADFKQ3QL6YF47HZFFLG4AIT7ZO7IMQRSLDXXKZCBY&submitOrderParam.fp=2a411e27452e6e815f0e5da7ea5fad28&submitOrderParam.preMainSkuId=10025828799074&submitOrderParam.jxj=1&submitOrderParam.zpjd=1"'
+        param_dict = dict(parse.parse_qsl(param_str))
+        #param_dict.submitOrderParam.presaleMobile = ""
+        #param_dict['submitOrderParam.trackID'] = self._extra_config['track_id']
+        param_dict['submitOrderParam.preMainSkuId'] = sku
+
+        headers = {
+            'User-Agent': self._user_agent,
+            'Host': 'trade.jd.com',
+            'Referer': get_presall_info_url,
+        }
+
+        #self._save_invoice()
+        resp = self.sess.post(url=url, data=param_dict, headers=headers)
+        resp_json = json.loads(resp.text)
+
+        if resp_json.get('success'):
+            order_id = resp_json.get('orderId')
+            logger.info('订单提交成功! 订单号：%s', order_id)
+            #if self.send_message:
+            #    self.messenger.send(text='jd-assistant 订单提交成功', desp='订单号：%s' % order_id)
+            return True
+        else:
+            message, result_code = resp_json.get('message'), resp_json.get('resultCode')
+            if result_code == 0:
+                self._save_invoice()
+                message += '(下单商品可能为第三方商品，将切换为普通发票进行尝试)'
+                if message == "您多次提交过快，请稍后再试":
+                    message += "(您多次提交过快，请稍后再试)"
+                    time.sleep(5)
+            elif result_code == 60077:
+                message += '(可能是购物车为空 或 未勾选购物车中商品)'
+            elif result_code == 60123:
+                message += '(需要在config.ini文件中配置支付密码)'
+            elif result_code == 600158:
+                message += '抢的商品没货了'
+            logger.info('订单提交失败, 错误码：%s, 返回信息：%s', result_code, message)
+            logger.info(resp_json)
+            return False
+
+
+
 
     def _save_invoice(self):
         """下单第三方商品时如果未设置发票，将从电子发票切换为普通发票
@@ -957,7 +1049,7 @@ class JdUser(object):
             "invoiceParam.saveInvoiceFlag": 1
         }
         headers = {
-            'User-Agent': self.__user_agent,
+            'User-Agent': self._user_agent,
             'Referer': 'https://trade.jd.com/shopping/dynamic/invoice/saveInvoice.action',
         }
         resp = self.sess.post(url=url, data=data, headers=headers)
